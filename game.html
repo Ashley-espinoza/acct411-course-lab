@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Archery: Cupid Has Been Fired</title>
+<style>
+  /* Use a local stylesheet so the game does not depend on outside resources. */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 12px;
+    font-family: Arial, sans-serif;
+    background: #24113d; color: white; text-align: center;
+  }
+  h2 { margin: 3px 0 6px; color: #ffd166; font-size: clamp(18px, 3vw, 26px); }
+  .subtitle { margin: 4px 0 10px; color: #e8d8ff; }
+  canvas {
+    display: block; width: 100%; max-width: 800px; height: auto;
+    margin: 0 auto; background: #b9e7ff; border: 4px solid #ffd166;
+    border-radius: 12px; outline: none; touch-action: manipulation;
+  }
+  .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; margin: 10px auto; }
+  .controls span { padding: 7px 10px; background: #6b3fa0; border-radius: 8px; font-size: 13px; }
+  .controls span.shoot { background: #b23a48; }
+  .controls span.restart { background: #287271; }
+  #status { min-height: 24px; margin: 8px 0; color: #ffd166; font-weight: bold; }
+  button { border: 0; border-radius: 9px; padding: 9px 15px; font-size: 14px; font-weight: bold;
+           cursor: pointer; color: #24113d; background: #ffd166; }
+  .version { margin: 10px 0 0; color: #cbb9e6; font-size: 11px; }
+</style>
+</head>
+<body>
+  <h2>🏹 ARCHERY: CUPID HAS BEEN FIRED</h2>
+  <p class="subtitle">Shoot the targets. Miss the targets. Blame the wind.</p>
+
+  <!-- Canvas is the game's drawing surface. JavaScript paints all game objects here. -->
+  <canvas id="game" width="800" height="440" tabindex="0" aria-label="Archery game area"></canvas>
+
+  <div class="controls" aria-label="Game controls">
+    <span>⬆️ W = Aim Up</span>
+    <span>⬇️ X = Aim Down</span>
+    <span class="shoot">🏹 SPACE = Shoot</span>
+    <span class="restart">🔄 R = Restart</span>
+  </div>
+  <p id="status" role="status">Click the game, then shoot something questionable.</p>
+  <button id="restartButton" type="button">RESTART THE DISASTER 🔄</button>
+  <p class="version">Version 1.0 · Fictional targets, fictional points, questionable decisions.</p>
+
+<script>
+(() => {
+  // =============================================================
+  // 1. SET UP THE CANVAS AND GAME VARIABLES
+  // =============================================================
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const status = document.getElementById('status');
+  const restartButton = document.getElementById('restartButton');
+  const W = canvas.width;
+  const H = canvas.height;
+
+  // The archer stays near the left side. The angle controls the bow direction.
+  const archer = { x: 95, y: 255, angle: 0 };
+  const MIN_ANGLE = -65;
+  const MAX_ANGLE = 65;
+
+  // Targets use emoji, so the game needs no image downloads or asset folders.
+  const targetTypes = [
+    { emoji: '🐔', name: 'SUSPICIOUS CHICKEN', points: 10, size: 24 },
+    { emoji: '🕊️', name: 'DRAMATIC PIGEON', points: 15, size: 23 },
+    { emoji: '🌮', name: 'FLYING TACO', points: 20, size: 25 },
+    { emoji: '🧀', name: 'ILLEGAL CHEESE', points: 10, size: 23 },
+    { emoji: '🤡', name: "YOUR EX'S CLOWN", points: 25, size: 25 },
+    { emoji: '☕', name: "BOSS'S COFFEE", points: 30, size: 22 },
+    { emoji: '🦆', name: 'TAX-EVADING DUCK', points: 20, size: 25 }
+  ];
+
+  const hitJokes = [
+    'BULLSEYE! The chicken has hired a lawyer.',
+    'NICE SHOT! The pigeon is filing a complaint.',
+    'THAT TACO NEVER SAW IT COMING.',
+    'Your ancestors just nodded approvingly.',
+    'Cupid called. He wants your job back.',
+    'THE DUCK HAS BEEN REPORTED TO THE IRS.',
+    'Incredible! Somewhere, a coach is crying.',
+    'That was suspiciously professional.',
+    "The coffee mug's family wants answers.",
+    'Archery school has officially un-fired you.'
+  ];
+
+  const missJokes = [
+    'The air has taken another arrow. Tragic.',
+    'You hit absolutely nobody. Impressive.',
+    'The target is laughing at you.',
+    'Your arrow is pursuing a different career.',
+    'That shot had the accuracy of a group project.',
+    "Even the wind said, 'Not my problem.'",
+    'The arrow has left the chat.',
+    'The chicken has dodged your student loans too.',
+    'Olympic scouts are looking the other way.',
+    'Your aim is currently a public safety concern.'
+  ];
+
+  let arrows = [];
+  let targets = [];
+  let particles = [];
+  let score = 0;
+  let shots = 0;
+  let hits = 0;
+  let timeLeft = 60;
+  let gameOver = false;
+  let spawnClock = 0;
+  let lastTimestamp = 0;
+  let animationId = null;
+  const keysDown = Object.create(null);
+
+  // Helpers keep repeated calculations short and readable.
+  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+  const radians = degrees => degrees * Math.PI / 180;
+  const randomItem = list => list[Math.floor(Math.random() * list.length)];
+
+  // =============================================================
+  // 2. CREATE TARGETS AND FIRE ARROWS
+  // =============================================================
+  function spawnTarget() {
+    const type = randomItem(targetTypes);
+    targets.push({
+      x: W + 35,
+      y: 90 + Math.random() * 270,
+      speed: 2.0 + Math.random() * 2.2 + (60 - timeLeft) * 0.025,
+      type,
+      alive: true,
+      wobble: Math.random() * Math.PI * 2
+    });
+  }
+
+  function shootArrow() {
+    if (gameOver) return;
+    const angle = radians(archer.angle);
+    // Velocity is calculated from the bow angle: cosine controls left/right,
+    // sine controls up/down. The screen's y-axis increases downward.
+    arrows.push({
+      x: archer.x + 25,
+      y: archer.y - 22,
+      vx: Math.cos(angle) * 8.5,
+      vy: -Math.sin(angle) * 8.5,
+      angle,
+      alive: true
+    });
+    shots++;
+    status.textContent = 'ARROW DEPLOYED. SOMEBODY CALL HR.';
+  }
+
+  // =============================================================
+  // 3. DRAW THE BACKGROUND, CLOUDS, AND ARCHER
+  // =============================================================
+  function drawCloud(x, y) {
+    ctx.beginPath();
+    ctx.arc(x, y, 18, 0, Math.PI * 2);
+    ctx.arc(x + 20, y - 9, 22, 0, Math.PI * 2);
+    ctx.arc(x + 42, y, 17, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawBackground() {
+    ctx.fillStyle = '#b9e7ff';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    drawCloud(140, 65); drawCloud(390, 95); drawCloud(655, 55);
+
+    // Sun and layered grass.
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.arc(735, 72, 28, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#70bd68'; ctx.fillRect(0, 385, W, 55);
+    ctx.fillStyle = '#4c984d'; ctx.fillRect(0, 414, W, 26);
+    ctx.strokeStyle = '#357a38'; ctx.lineWidth = 2;
+    for (let x = 10; x < W; x += 28) {
+      ctx.beginPath(); ctx.moveTo(x, 400); ctx.lineTo(x + 5, 390); ctx.stroke();
+    }
+    ctx.fillStyle = '#24113d'; ctx.font = 'bold 14px Arial';
+    ctx.fillText('THE DEPARTMENT OF QUESTIONABLE DECISIONS', 15, 425);
+  }
+
+  function drawArcher() {
+    ctx.save();
+    // Shirt and body.
+    ctx.fillStyle = '#7b2cbf'; ctx.fillRect(archer.x - 15, archer.y - 5, 30, 52);
+    // Face.
+    ctx.fillStyle = '#f1c27d';
+    ctx.beginPath(); ctx.arc(archer.x, archer.y - 22, 19, 0, Math.PI * 2); ctx.fill();
+    // Hair.
+    ctx.fillStyle = '#55351b';
+    ctx.beginPath(); ctx.arc(archer.x, archer.y - 31, 18, Math.PI, Math.PI * 2); ctx.fill();
+    // Eyes and smile.
+    ctx.fillStyle = '#24113d';
+    ctx.beginPath(); ctx.arc(archer.x - 6, archer.y - 23, 2.5, 0, Math.PI * 2);
+    ctx.arc(archer.x + 6, archer.y - 23, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#8c3b32'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(archer.x, archer.y - 18, 7, 0.2, Math.PI - 0.2); ctx.stroke();
+
+    // Rotate the bow itself to match the player's current aiming angle.
+    ctx.translate(archer.x + 16, archer.y - 15);
+    ctx.rotate(-radians(archer.angle));
+    ctx.strokeStyle = '#784421'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(0, 0, 25, -Math.PI / 2, Math.PI / 2); ctx.stroke();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(0, -25); ctx.lineTo(0, 25); ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = '#24113d'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('PROBABLY QUALIFIED', archer.x, archer.y + 63);
+    ctx.textAlign = 'left';
+  }
+
+  // =============================================================
+  // 4. DRAW MOVING TARGETS AND ARROWS
+  // =============================================================
+  function drawTargets() {
+    for (const target of targets) {
+      if (!target.alive) continue;
+      const wobbleY = Math.sin(target.wobble) * 4;
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.beginPath(); ctx.arc(target.x, target.y + wobbleY, 26, 0, Math.PI * 2); ctx.fill();
+      ctx.font = '34px Arial'; ctx.textAlign = 'center';
+      ctx.fillText(target.type.emoji, target.x, target.y + 12 + wobbleY);
+      ctx.fillStyle = '#24113d'; ctx.font = 'bold 12px Arial';
+      ctx.fillText('+' + target.type.points, target.x, target.y + 39 + wobbleY);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  function drawArrows() {
+    for (const arrow of arrows) {
+      ctx.save(); ctx.translate(arrow.x, arrow.y); ctx.rotate(arrow.angle);
+      ctx.strokeStyle = '#54321a'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-17, 0); ctx.lineTo(18, 0); ctx.stroke();
+      ctx.fillStyle = '#e63946';
+      ctx.beginPath(); ctx.moveTo(22, 0); ctx.lineTo(12, -5); ctx.lineTo(12, 5); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.moveTo(-15, 0); ctx.lineTo(-22, -5); ctx.lineTo(-18, 0);
+      ctx.lineTo(-22, 5); ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  function drawHUD() {
+    ctx.fillStyle = 'rgba(36,17,61,0.88)'; ctx.fillRect(10, 10, 285, 67);
+    ctx.fillStyle = '#ffd166'; ctx.font = 'bold 18px Arial'; ctx.fillText('SCORE: ' + score, 22, 34);
+    ctx.fillStyle = '#ffffff'; ctx.font = '14px Arial';
+    ctx.fillText('TIME: ' + Math.ceil(timeLeft) + 's', 22, 57);
+    ctx.fillText('HITS: ' + hits + '/' + shots, 115, 57);
+    ctx.fillText('AIM: ' + Math.round(archer.angle) + '°', 210, 57);
+    ctx.fillStyle = '#24113d'; ctx.fillRect(650, 12, 138, 34);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 13px Arial';
+    const direction = archer.angle > 5 ? 'UP' : archer.angle < -5 ? 'DOWN' : 'STRAIGHT';
+    ctx.fillText('AIMING: ' + direction, 660, 33);
+  }
+
+  // =============================================================
+  // 5. HIT EFFECTS AND COLLISION DETECTION
+  // =============================================================
+  function makeParticles(x, y) {
+    for (let i = 0; i < 12; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 6,
+        vy: (Math.random() - 0.5) * 6,
+        life: 1,
+        emoji: randomItem(['✨', '💥', '⭐', '😂'])
+      });
+    }
+  }
+
+  function updateAndDrawParticles(delta) {
+    for (const p of particles) {
+      p.x += p.vx * delta; p.y += p.vy * delta; p.life -= 0.025 * delta;
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.font = '18px Arial'; ctx.fillText(p.emoji, p.x, p.y);
+    }
+    particles = particles.filter(p => p.life > 0);
+    ctx.globalAlpha = 1;
+  }
+
+  function update(delta) {
+    if (gameOver) return;
+
+    // W increases the elevation angle; X decreases it.
+    if (keysDown['w']) archer.angle = clamp(archer.angle + 1.6 * delta, MIN_ANGLE, MAX_ANGLE);
+    if (keysDown['x']) archer.angle = clamp(archer.angle - 1.6 * delta, MIN_ANGLE, MAX_ANGLE);
+
+    // Spawn a new target after a short interval.
+    spawnClock += delta;
+    if (spawnClock > 55) { spawnTarget(); spawnClock = 0; }
+
+    // Move all targets left. Targets that escape cost two points.
+    for (const target of targets) {
+      target.x -= target.speed * delta; target.wobble += 0.08 * delta;
+      if (target.x < -40 && target.alive) {
+        target.alive = false; score = Math.max(0, score - 2);
+        status.textContent = 'A TARGET ESCAPED. MINUS 2 POINTS. HOW EMBARRASSING.';
+      }
+    }
+
+    // Move every arrow and see whether its tip touches a target.
+    for (const arrow of arrows) {
+      arrow.x += arrow.vx * delta; arrow.y += arrow.vy * delta;
+      for (const target of targets) {
+        if (!target.alive || !arrow.alive) continue;
+        const dx = arrow.x - target.x;
+        const dy = arrow.y - target.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < target.type.size + 7) {
+          target.alive = false; arrow.alive = false;
+          score += target.type.points; hits++;
+          status.textContent = randomItem(hitJokes);
+          makeParticles(target.x, target.y);
+        }
+      }
+      // Remove arrows that travel outside the game canvas.
+      if (arrow.x > W + 30 || arrow.y < -30 || arrow.y > H + 30) arrow.alive = false;
+    }
+
+    arrows = arrows.filter(a => a.alive);
+    targets = targets.filter(t => t.alive && t.x > -60);
+    timeLeft -= (delta * 16.67) / 1000;
+    if (timeLeft <= 0) { timeLeft = 0; gameOver = true; }
+  }
+
+  // =============================================================
+  // 6. END GAME SCREEN
+  // =============================================================
+  function drawGameOver() {
+    const accuracy = shots > 0 ? Math.round(hits / shots * 100) : 0;
+    let rank;
+    if (score >= 250) rank = 'LEGENDARY ARCHER 🏆';
+    else if (score >= 150) rank = 'SUSPICIOUSLY COMPETENT 🥇';
+    else if (score >= 70) rank = 'NOT A COMPLETE DISASTER 🥈';
+    else rank = 'THE TARGETS FEEL SAFE 🥔';
+
+    ctx.fillStyle = 'rgba(36,17,61,0.90)'; ctx.fillRect(110, 105, 580, 225);
+    ctx.textAlign = 'center'; ctx.fillStyle = '#ffd166'; ctx.font = 'bold 34px Arial';
+    ctx.fillText("TIME'S UP!", W / 2, 155);
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 22px Arial'; ctx.fillText('Final Score: ' + score, W / 2, 197);
+    ctx.font = '18px Arial'; ctx.fillText('Accuracy: ' + accuracy + '%', W / 2, 230);
+    ctx.fillStyle = '#e8d8ff'; ctx.font = '16px Arial';
+    ctx.fillText(rank, W / 2, 264); ctx.fillText('Press R or click RESTART to try again.', W / 2, 295);
+    ctx.textAlign = 'left';
+    status.textContent = 'GAME OVER! ' + rank;
+  }
+
+  // =============================================================
+  // 7. KEYBOARD INPUT
+  // =============================================================
+  // The browser only sends keyboard events into this iframe when it has
+  // focus. Click the canvas first. Using one listener avoids double shots.
+  canvas.addEventListener('click', () => canvas.focus());
+  document.addEventListener('keydown', event => {
+    const key = event.key.toLowerCase();
+    if ([' ', 'arrowup', 'arrowdown'].includes(key)) event.preventDefault();
+    keysDown[key] = true;
+    if (key === ' ' && !event.repeat) shootArrow();
+    if (key === 'r' && !event.repeat) resetGame();
+  });
+  document.addEventListener('keyup', event => { delete keysDown[event.key.toLowerCase()]; });
+  window.addEventListener('blur', () => {
+    // Prevent a stuck movement key if the player switches browser tabs.
+    Object.keys(keysDown).forEach(key => delete keysDown[key]);
+  });
+
+  // =============================================================
+  // 8. RESET AND MAIN ANIMATION LOOP
+  // =============================================================
+  function resetGame() {
+    if (animationId !== null) cancelAnimationFrame(animationId);
+    arrows = []; targets = []; particles = [];
+    score = 0; shots = 0; hits = 0; timeLeft = 60; gameOver = false;
+    spawnClock = 0; lastTimestamp = 0; archer.angle = 0;
+    Object.keys(keysDown).forEach(key => delete keysDown[key]);
+    spawnTarget();
+    status.textContent = 'New round! The chicken has requested legal representation.';
+    canvas.focus();
+    animationId = requestAnimationFrame(gameLoop);
+  }
+
+  function gameLoop(timestamp) {
+    // Delta makes movement reasonably consistent across screen refresh rates.
+    let delta = lastTimestamp ? (timestamp - lastTimestamp) / 16.67 : 1;
+    delta = Math.min(delta, 2); // Avoid large jumps after a tab switch.
+    lastTimestamp = timestamp;
+
+    update(delta);
+    drawBackground(); drawTargets(); drawArcher(); drawArrows();
+    updateAndDrawParticles(delta); drawHUD();
+
+    if (gameOver) drawGameOver();
+    else animationId = requestAnimationFrame(gameLoop);
+  }
+
+  restartButton.addEventListener('click', resetGame);
+  spawnTarget();
+  animationId = requestAnimationFrame(gameLoop);
+})();
+</script>
+</body>
+</html>
