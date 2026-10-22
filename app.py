@@ -29,7 +29,7 @@ if not game_file.exists():
 else:
     # st.iframe reads a local HTML file and embeds it with its JavaScript intact.
     # The height gives the canvas and controls enough room to be visible.
-   # Display the archery game inside the Streamlit page.
-st.iframe(game_file, height=610)
+    # Display the archery game inside the Streamlit page.
+    st.iframe(game_file, height=610)
 
 st.caption("Version 1.0 · Targets and points are fictional. No actual chickens were harmed.")
