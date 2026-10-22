@@ -243,11 +243,13 @@
   }
 
   function drawHUD() {
-    ctx.fillStyle = 'rgba(36,17,61,0.88)'; ctx.fillRect(10, 10, 285, 67);
+    ctx.fillStyle = 'rgba(36,17,61,0.88)'; ctx.fillRect(10, 10, 285, 88);
     ctx.fillStyle = '#ffd166'; ctx.font = 'bold 18px Arial'; ctx.fillText('SCORE: ' + score, 22, 34);
     ctx.fillStyle = '#ffffff'; ctx.font = '14px Arial';
     ctx.fillText('TIME: ' + Math.ceil(timeLeft) + 's', 22, 57);
     ctx.fillText('HITS: ' + hits + '/' + shots, 115, 57);
+    const accuracy = shots > 0 ? Math.round((hits / shots) * 100) : 0;
+    ctx.fillText("ACCURACY: " + accuracy + "%", 22, 78);
     ctx.fillText('AIM: ' + Math.round(archer.angle) + '°', 210, 57);
     ctx.fillStyle = '#24113d'; ctx.fillRect(650, 12, 138, 34);
     ctx.fillStyle = '#ffffff'; ctx.font = 'bold 13px Arial';
